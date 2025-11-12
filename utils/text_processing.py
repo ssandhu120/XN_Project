@@ -9,9 +9,9 @@ class TextProcessor:
     
     def __init__(self):
         self.crisis_keywords = {
-            'suicide', 'kill myself', 'end it all', 'not worth living', 'better off dead',
+            'suicide', 'kill myself', 'killing myself', 'end it all', 'not worth living', 'better off dead',
             'suicide', 'suicidal', 'harm myself', 'hurt myself', 'end my life',
-            'want to die', 'wish I was dead', 'no point in living'
+            'want to die', 'wish I was dead', 'no point in living', 'take my life'
         }
         
         self.high_severity_keywords = {

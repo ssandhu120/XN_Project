@@ -278,6 +278,45 @@ class MentalHealthMatcher:
                 formatted_parts.append("")
         
         return "\n".join(formatted_parts)
+    
+    def get_contextual_recommendations(self, categories: List[str], severity: SeverityLevel) -> List[Recommendation]:
+        """Generate recommendations based on conversation context categories."""
+        recommendations = []
+        
+        # Get resources for the conversation context categories
+        context_resources = self._get_category_resources(categories, severity)
+        
+        # Generate recommendations from context resources
+        for i, resource in enumerate(context_resources[:6]):  # Limit to 6 resources
+            relevance_score = self._calculate_resource_relevance(
+                resource, [], categories, severity  # Empty keywords since we're using context
+            )
+            
+            # Determine reasoning based on primary category
+            primary_category = categories[0] if categories else 'general_mental_health'
+            category_descriptions = {
+                'social_isolation': 'loneliness and social isolation',
+                'academic_stress': 'exam anxiety and academic pressure', 
+                'cultural_adjustment': 'international student support and cultural adjustment',
+                'self_esteem': 'self-esteem and confidence building',
+                'crisis': 'crisis intervention and immediate support'
+            }
+            
+            reasoning = category_descriptions.get(primary_category, 'general mental health support')
+            
+            recommendations.append(Recommendation(
+                resource_id=resource.id,
+                resource_name=resource.name,
+                relevance_score=relevance_score,
+                reasoning=f"Recommended for {reasoning}",
+                priority=i + 1,
+                follow_up_actions=self._get_follow_up_actions(resource, severity)
+            ))
+        
+        # Sort by relevance score
+        recommendations.sort(key=lambda x: x.relevance_score, reverse=True)
+        
+        return recommendations
 
 # Global matcher instance
 mental_health_matcher = MentalHealthMatcher()

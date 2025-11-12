@@ -215,6 +215,22 @@ class ScenarioDatabase:
             ]
         )
         
+        # Provider Search Scenario
+        scenarios["provider_search_request"] = MentalHealthScenario(
+            id="provider_search_request",
+            title="Finding Mental Health Providers",
+            description="Student requesting help finding mental health providers in their area",
+            keywords=["find provider", "find therapist", "need help finding", "therapy near me", "mental health provider"],
+            severity=SeverityLevel.MODERATE,
+            category="provider_search",
+            common_triggers=["need ongoing support", "want professional help", "insurance coverage"],
+            recommended_resources=["provider_search", "mindbridge_provider_network"],
+            response_templates=[
+                "I'd be happy to help you find mental health providers that match your needs and insurance.",
+                "Let me help you find qualified therapists and counselors in your area."
+            ]
+        )
+        
         return scenarios
     
     def get_scenario(self, scenario_id: str) -> MentalHealthScenario:

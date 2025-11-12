@@ -12,8 +12,8 @@ class CrisisHandler:
     def __init__(self):
         self.crisis_keywords = {
             'immediate_danger': [
-                'kill myself', 'end my life', 'suicide', 'want to die', 
-                'better off dead', 'not worth living', 'end it all'
+                'kill myself', 'killing myself', 'end my life', 'suicide', 'want to die', 
+                'better off dead', 'not worth living', 'end it all', 'take my life'
             ],
             'self_harm': [
                 'hurt myself', 'harm myself', 'cut myself', 'self-harm',

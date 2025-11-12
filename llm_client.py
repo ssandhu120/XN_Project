@@ -43,13 +43,88 @@ class LLMClient:
         """Initialize Gemini client."""
         try:
             import google.generativeai as genai
+            
+            # Validate API key
+            if not config.GEMINI_API_KEY or len(config.GEMINI_API_KEY.strip()) < 10:
+                logger.warning("Invalid or missing Gemini API key")
+                return
+            
+            # Configure and test the client
             genai.configure(api_key=config.GEMINI_API_KEY)
-            self.client = genai.GenerativeModel('gemini-pro')
-            logger.info("Gemini client initialized successfully")
+            
+            # First, try to discover available models
+            available_models = []
+            try:
+                models = genai.list_models()
+                for model in models:
+                    if hasattr(model, 'supported_generation_methods') and 'generateContent' in model.supported_generation_methods:
+                        available_models.append(model.name)
+                logger.info(f"Found {len(available_models)} available models: {available_models[:3]}")
+            except Exception as list_error:
+                logger.warning(f"Could not list models: {list_error}")
+                # Fallback to common model names, prioritizing 2.0 series
+                available_models = [
+                    'gemini-2.0-flash-exp',
+                    'gemini-2.0-flash',
+                    'models/gemini-2.0-flash-exp', 
+                    'models/gemini-2.0-flash',
+                    'gemini-1.5-flash-latest',
+                    'gemini-1.5-flash',
+                    'gemini-1.5-pro',
+                    'models/gemini-1.5-flash-latest',
+                    'models/gemini-1.5-flash',
+                    'models/gemini-1.5-pro', 
+                    'models/gemini-pro',
+                    'gemini-pro'
+                ]
+            
+            # Try each available model
+            for model_name in available_models:
+                try:
+                    self.client = genai.GenerativeModel(model_name)
+                    logger.info(f"Successfully using Gemini model: {model_name}")
+                    break
+                except Exception as model_error:
+                    logger.warning(f"Model {model_name} not available: {model_error}")
+                    continue
+            
+            if not self.client:
+                raise Exception(f"No working Gemini models found. Available: {available_models[:5]}")
+            
+            # If we got here, the client was created successfully
+            logger.info(f"Gemini client initialized successfully with model")
+            
+            # Optional test - don't fail if this doesn't work
+            try:
+                test_response = self.client.generate_content(
+                    "Hello", 
+                    generation_config={
+                        'max_output_tokens': 10,
+                        'temperature': 0.1
+                    }
+                )
+                
+                if test_response and hasattr(test_response, 'text'):
+                    try:
+                        response_text = test_response.text
+                        if response_text:
+                            logger.info(f"Test successful: {response_text[:30]}")
+                        else:
+                            logger.info("Test completed (empty response, likely safety filters)")
+                    except:
+                        logger.info("Test completed (text access blocked, likely safety filters)")
+                else:
+                    logger.info("Test completed (no response object)")
+                    
+            except Exception as test_error:
+                logger.info(f"Test request failed but client is still valid: {test_error}")
+                # Don't fail - the client creation succeeded, so API key is good
+                
         except ImportError:
             logger.warning("Google Generative AI library not available")
         except Exception as e:
             logger.error(f"Gemini initialization failed: {e}")
+            self.client = None
     
     def generate_response(self, user_input: str, context: Dict[str, Any] = None) -> str:
         """Generate response using LLM or fallback to rule-based response."""

@@ -35,6 +35,31 @@ class MentalHealthScenario:
     response_templates: List[str] = field(default_factory=list)
 
 @dataclass
+class Location:
+    """Represents a geographic location."""
+    address: str = ""
+    city: str = ""
+    state: str = ""
+    zip_code: str = ""
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    
+@dataclass
+class Provider:
+    """Represents a mental health provider."""
+    id: str
+    name: str
+    title: str  # Dr., LCSW, etc.
+    specialties: List[str] = field(default_factory=list)
+    insurance_networks: List[str] = field(default_factory=list)
+    location: Optional[Location] = None
+    contact_info: Dict[str, str] = field(default_factory=dict)
+    availability: str = ""
+    languages: List[str] = field(default_factory=lambda: ["English"])
+    telehealth_available: bool = False
+    accepting_new_patients: bool = True
+    
+@dataclass
 class Resource:
     """Represents a mental health resource or service."""
     id: str
@@ -47,6 +72,34 @@ class Resource:
     eligibility: List[str] = field(default_factory=list)
     website: Optional[str] = None
     is_crisis_resource: bool = False
+    # Enhanced fields for provider recommendations
+    location: Optional[Location] = None
+    insurance_networks: List[str] = field(default_factory=list)
+    providers: List[Provider] = field(default_factory=list)
+    service_area: List[str] = field(default_factory=list)  # Cities/regions served
+    telehealth_available: bool = False
+
+@dataclass
+class UserPreferences:
+    """User preferences for provider matching."""
+    location: Optional[Location] = None
+    insurance_plan: Optional[str] = None
+    preferred_provider_type: List[str] = field(default_factory=list)  # therapist, psychiatrist, etc.
+    preferred_specialties: List[str] = field(default_factory=list)
+    preferred_languages: List[str] = field(default_factory=lambda: ["English"])
+    telehealth_preference: str = "no_preference"  # "required", "preferred", "no_preference", "in_person_only"
+    max_distance_miles: Optional[int] = None
+    budget_range: Optional[str] = None
+    availability_preference: List[str] = field(default_factory=list)  # "weekdays", "evenings", "weekends"
+
+@dataclass
+class ProviderMatch:
+    """Represents a matched provider with relevance score."""
+    provider: Provider
+    resource: Resource
+    match_score: float
+    match_reasons: List[str] = field(default_factory=list)
+    distance_miles: Optional[float] = None
 
 @dataclass
 class UserMessage:
