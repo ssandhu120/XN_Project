@@ -158,8 +158,8 @@ class ConversationManager:
         # Prepare context for LLM
         context = mental_health_matcher.get_conversation_context(analysis)
         
-        # Try to generate LLM response
-        llm_response = llm_client.generate_response(analysis['original_input'], context)
+        # Try to generate LLM response with debug info
+        llm_response, response_source = self._generate_llm_response_with_debug(analysis['original_input'], context)
         
         # Add resource recommendations based on conversation context
         conversation_categories = self._get_conversation_context(session, analysis)
@@ -170,11 +170,24 @@ class ConversationManager:
             contextual_recommendations
         )
         
-        # Combine LLM response with recommendations
-        if recommendations_text and not analysis['requires_immediate_attention']:
-            full_response = f"{llm_response}\n\n{recommendations_text}"
+        # Add debug badge based on response source
+        debug_badge = ""
+        if config.DEBUG_MODE or True:  # Always show for now
+            if response_source == "gemini":
+                debug_badge = "🤖 **AI Response** "
+            elif response_source == "fallback":
+                debug_badge = "📋 **Rule-based Response** "
+            elif response_source == "error":
+                debug_badge = "⚠️ **Fallback Response** "
+        
+        # Combine response with debug info and recommendations
+        if debug_badge:
+            full_response = f"{debug_badge}\n\n{llm_response}"
         else:
             full_response = llm_response
+        
+        if recommendations_text and not analysis['requires_immediate_attention']:
+            full_response = f"{full_response}\n\n{recommendations_text}"
         
         # Add follow-up questions if appropriate
         # Use established conversation context instead of re-analyzing
@@ -186,6 +199,39 @@ class ConversationManager:
             full_response += f"\n\n{follow_up}"
         
         return full_response
+    
+    def _generate_llm_response_with_debug(self, user_input: str, context: Dict) -> Tuple[str, str]:
+        """Generate LLM response with debug information about the source."""
+        try:
+            # First try to detect what type of response we'll get
+            if not config.ENABLE_LLM or not llm_client.client:
+                logger.info(f"LLM disabled or unavailable - using fallback")
+                response = llm_client.generate_response(user_input, context)
+                return response, "fallback"
+            
+            # Try LLM response
+            response = llm_client.generate_response(user_input, context)
+            
+            # Check if response contains fallback indicators
+            fallback_indicators = [
+                "I understand you're reaching out",
+                "Thank you for sharing",
+                "It's important to know that you're not alone"
+            ]
+            
+            is_likely_fallback = any(indicator in response for indicator in fallback_indicators)
+            
+            if is_likely_fallback:
+                logger.info(f"Response appears to be fallback-based")
+                return response, "fallback"
+            else:
+                logger.info(f"Response appears to be AI-generated")
+                return response, "gemini"
+                
+        except Exception as e:
+            logger.error(f"Error in LLM response generation: {e}")
+            response = llm_client._generate_fallback_response(user_input, context)
+            return response, "error"
     
     def _determine_response_type(self, analysis: Dict) -> str:
         """Determine the type of response based on analysis."""

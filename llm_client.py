@@ -62,8 +62,10 @@ class LLMClient:
                 logger.info(f"Found {len(available_models)} available models: {available_models[:3]}")
             except Exception as list_error:
                 logger.warning(f"Could not list models: {list_error}")
-                # Fallback to common model names, prioritizing 2.0 series
+                # Fallback to common model names, prioritizing 2.5 flash and 2.0 series
                 available_models = [
+                    'gemini-2.5-flash',
+                    'models/gemini-2.5-flash',
                     'gemini-2.0-flash-exp',
                     'gemini-2.0-flash',
                     'models/gemini-2.0-flash-exp', 
@@ -82,7 +84,7 @@ class LLMClient:
             for model_name in available_models:
                 try:
                     self.client = genai.GenerativeModel(model_name)
-                    logger.info(f"Successfully using Gemini model: {model_name}")
+                    logger.info(f"🤖 Successfully using Gemini model: {model_name}")
                     break
                 except Exception as model_error:
                     logger.warning(f"Model {model_name} not available: {model_error}")
@@ -92,7 +94,7 @@ class LLMClient:
                 raise Exception(f"No working Gemini models found. Available: {available_models[:5]}")
             
             # If we got here, the client was created successfully
-            logger.info(f"Gemini client initialized successfully with model")
+            logger.info(f"✅ Gemini client initialized successfully with debugging enabled")
             
             # Optional test - don't fail if this doesn't work
             try:
@@ -101,25 +103,30 @@ class LLMClient:
                     generation_config={
                         'max_output_tokens': 10,
                         'temperature': 0.1
-                    }
+                    },
+                    safety_settings=[
+                        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"},
+                    ]
                 )
                 
                 if test_response and hasattr(test_response, 'text'):
                     try:
                         response_text = test_response.text
                         if response_text:
-                            logger.info(f"Test successful: {response_text[:30]}")
+                            logger.info(f"🎯 Test successful: {response_text[:30]}")
                         else:
-                            logger.info("Test completed (empty response, likely safety filters)")
+                            logger.info("⚠️ Test completed (empty response, likely safety filters)")
                     except:
-                        logger.info("Test completed (text access blocked, likely safety filters)")
+                        logger.info("⚠️ Test completed (text access blocked, likely safety filters)")
                 else:
-                    logger.info("Test completed (no response object)")
+                    logger.info("⚠️ Test completed (no response object)")
                     
             except Exception as test_error:
-                logger.info(f"Test request failed but client is still valid: {test_error}")
+                logger.info(f"⚠️ Test request failed but client is still valid: {test_error}")
                 # Don't fail - the client creation succeeded, so API key is good
-                
         except ImportError:
             logger.warning("Google Generative AI library not available")
         except Exception as e:
@@ -130,12 +137,17 @@ class LLMClient:
         """Generate response using LLM or fallback to rule-based response."""
         if self.client and config.ENABLE_LLM:
             try:
-                return self._generate_llm_response(user_input, context)
+                logger.info(f"🤖 Attempting {self.provider.upper()} AI response generation...")
+                response = self._generate_llm_response(user_input, context)
+                logger.info(f"✅ {self.provider.upper()} AI response generated successfully")
+                return response
             except Exception as e:
-                logger.error(f"LLM response generation failed: {e}")
+                logger.error(f"❌ LLM response generation failed: {e}")
                 logger.log_llm_usage(self.provider, False, True)
+                logger.info(f"📋 Falling back to rule-based response")
                 return self._generate_fallback_response(user_input, context)
         else:
+            logger.info(f"📋 Using rule-based response (LLM disabled or unavailable)")
             return self._generate_fallback_response(user_input, context)
     
     def _generate_llm_response(self, user_input: str, context: Dict[str, Any] = None) -> str:
@@ -167,15 +179,40 @@ class LLMClient:
         return response.choices[0].message.content.strip()
     
     def _call_gemini(self, prompt: str) -> str:
-        """Call Gemini API."""
-        response = self.client.generate_content(
-            prompt,
-            generation_config={
-                'max_output_tokens': config.MAX_TOKENS,
-                'temperature': config.TEMPERATURE
-            }
-        )
-        return response.text.strip()
+        """Call Gemini API with proper error handling."""
+        try:
+            response = self.client.generate_content(
+                prompt,
+                generation_config={
+                    'max_output_tokens': config.MAX_TOKENS,
+                    'temperature': config.TEMPERATURE
+                },
+                safety_settings=[
+                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"},
+                ]
+            )
+            
+            # Check if response was blocked or has issues
+            if not response.candidates:
+                raise ValueError("No candidates returned by Gemini")
+            
+            candidate = response.candidates[0]
+            if candidate.finish_reason == 3:  # SAFETY
+                raise ValueError("Response blocked by safety filters")
+            elif candidate.finish_reason == 4:  # RECITATION  
+                raise ValueError("Response blocked for recitation")
+            elif not candidate.content or not candidate.content.parts:
+                raise ValueError("Response has no content parts")
+            
+            # Extract text safely
+            return candidate.content.parts[0].text.strip()
+            
+        except Exception as e:
+            # If Gemini fails, let the parent method handle fallback
+            raise Exception(f"Gemini API error: {str(e)}")
     
     def _build_system_prompt(self, context: Dict[str, Any] = None) -> str:
         """Build system prompt for mental health conversations."""
