@@ -1,0 +1,358 @@
+"""Main Streamlit application for the XN Mental Health Chatbot."""
+
+import streamlit as st
+import time
+from datetime import datetime
+from typing import List, Dict
+
+from conversation_flow import conversation_manager
+from resource_database import resource_db
+from scenario_data import scenario_db
+from crisis_handler import crisis_handler
+from config import config
+from utils.logger import logger
+
+# Page configuration
+st.set_page_config(
+    page_title=config.APP_TITLE,
+    page_icon="🧠",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS for better styling
+st.markdown("""
+<style>
+    .main-header {
+        text-align: center;
+        padding: 1rem 0;
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-radius: 10px;
+        margin-bottom: 2rem;
+    }
+    
+    .crisis-alert {
+        background-color: #ff4444;
+        color: white;
+        padding: 1rem;
+        border-radius: 10px;
+        margin: 1rem 0;
+        font-weight: bold;
+    }
+    
+    .resource-card {
+        background-color: #f0f2f6;
+        padding: 1rem;
+        border-radius: 10px;
+        margin: 0.5rem 0;
+        border-left: 4px solid #667eea;
+    }
+    
+    .chat-message {
+        padding: 1rem;
+        border-radius: 10px;
+        margin: 0.5rem 0;
+    }
+    
+    .user-message {
+        background-color: #e3f2fd;
+        margin-left: 2rem;
+    }
+    
+    .bot-message {
+        background-color: #f5f5f5;
+        margin-right: 2rem;
+    }
+    
+    .sidebar-section {
+        background-color: #f8f9fa;
+        padding: 1rem;
+        border-radius: 10px;
+        margin: 1rem 0;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+def initialize_session_state():
+    """Initialize Streamlit session state variables."""
+    if 'session_id' not in st.session_state:
+        st.session_state.session_id = conversation_manager.start_new_session()
+    
+    if 'chat_history' not in st.session_state:
+        st.session_state.chat_history = []
+    
+    if 'show_welcome' not in st.session_state:
+        st.session_state.show_welcome = True
+    
+    if 'crisis_mode' not in st.session_state:
+        st.session_state.crisis_mode = False
+
+def display_header():
+    """Display the main application header."""
+    st.markdown(f"""
+    <div class="main-header">
+        <h1>🧠 {config.APP_TITLE}</h1>
+        <p>{config.APP_DESCRIPTION}</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+def display_sidebar():
+    """Display the sidebar with resources and information."""
+    with st.sidebar:
+        st.markdown("### 🆘 Crisis Resources")
+        st.markdown(f"""
+        <div class="sidebar-section">
+            <strong>Emergency Contacts:</strong><br>
+            📞 <strong>{config.CRISIS_HOTLINE}</strong><br>
+            📞 <strong>911</strong> (Emergency)<br>
+            📞 <strong>{config.NORTHEASTERN_COUNSELING}</strong> (CAPS)
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("### 🏥 Available Resources")
+        
+        # MindBridge Care Resources
+        mindbridge_resources = resource_db.get_mindbridge_resources()
+        if mindbridge_resources:
+            st.markdown("**MindBridge Care:**")
+            for resource in mindbridge_resources[:3]:
+                st.markdown(f"• {resource.name}")
+        
+        # Northeastern Resources
+        northeastern_resources = resource_db.get_northeastern_resources()
+        if northeastern_resources:
+            st.markdown("**Northeastern University:**")
+            for resource in northeastern_resources[:3]:
+                st.markdown(f"• {resource.name}")
+        
+        st.markdown("### ℹ️ About This Service")
+        st.markdown("""
+        This chatbot helps connect you with mental health resources and support. 
+        
+        **Important:** This is not a replacement for professional mental health care. 
+        If you're in crisis, please contact emergency services immediately.
+        """)
+        
+        # Session information
+        if st.session_state.session_id:
+            session_summary = conversation_manager.get_session_summary(st.session_state.session_id)
+            if session_summary:
+                st.markdown("### 📊 Session Info")
+                st.markdown(f"Messages: {session_summary['message_count']}")
+                st.markdown(f"Duration: {session_summary['duration_minutes']:.1f} min")
+
+def display_welcome_message():
+    """Display welcome message for new users."""
+    if st.session_state.show_welcome:
+        welcome_msg = conversation_manager.get_welcome_message()
+        
+        st.markdown(f"""
+        <div class="chat-message bot-message">
+            <strong>🤖 Mental Health Assistant:</strong><br>
+            {welcome_msg}
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.session_state.show_welcome = False
+
+def display_chat_history():
+    """Display the conversation history."""
+    for message in st.session_state.chat_history:
+        if message['type'] == 'user':
+            st.markdown(f"""
+            <div class="chat-message user-message">
+                <strong>👤 You:</strong><br>
+                {message['content']}
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            # Check if it's a crisis message
+            css_class = "bot-message"
+            if message.get('is_crisis', False):
+                css_class += " crisis-alert"
+            
+            st.markdown(f"""
+            <div class="chat-message {css_class}">
+                <strong>🤖 Assistant:</strong><br>
+                {message['content']}
+            </div>
+            """, unsafe_allow_html=True)
+
+def handle_user_input():
+    """Handle user input and generate response."""
+    user_input = st.session_state.user_input
+    
+    if user_input.strip():
+        # Add user message to history
+        st.session_state.chat_history.append({
+            'type': 'user',
+            'content': user_input,
+            'timestamp': datetime.now()
+        })
+        
+        # Process message and get response
+        try:
+            response, is_crisis = conversation_manager.process_user_message(
+                st.session_state.session_id, user_input
+            )
+            
+            # Add bot response to history
+            st.session_state.chat_history.append({
+                'type': 'bot',
+                'content': response,
+                'timestamp': datetime.now(),
+                'is_crisis': is_crisis
+            })
+            
+            # Update crisis mode
+            st.session_state.crisis_mode = is_crisis
+            
+            # Log interaction
+            logger.log_user_interaction(
+                st.session_state.session_id, 
+                "message_processed"
+            )
+            
+        except Exception as e:
+            logger.log_error(e, "message_processing")
+            st.error("I'm sorry, I encountered an error. Please try again or contact support.")
+        
+        # Clear input
+        st.session_state.user_input = ""
+
+def display_crisis_banner():
+    """Display crisis banner if in crisis mode."""
+    if st.session_state.crisis_mode:
+        st.markdown("""
+        <div class="crisis-alert">
+            🚨 <strong>CRISIS SUPPORT ACTIVATED</strong> 🚨<br>
+            If you're in immediate danger, please call 911 or go to your nearest emergency room.
+            For crisis support, call 988 (Suicide & Crisis Lifeline) available 24/7.
+        </div>
+        """, unsafe_allow_html=True)
+
+def display_quick_actions():
+    """Display quick action buttons."""
+    st.markdown("### Quick Actions")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        if st.button("🎓 Academic Stress"):
+            st.session_state.user_input = "I'm feeling overwhelmed with academic pressure and exams"
+            handle_user_input()
+            st.rerun()
+    
+    with col2:
+        if st.button("😔 Feeling Lonely"):
+            st.session_state.user_input = "I'm feeling lonely and isolated at college"
+            handle_user_input()
+            st.rerun()
+    
+    with col3:
+        if st.button("🏠 Homesick"):
+            st.session_state.user_input = "I'm an international student feeling homesick"
+            handle_user_input()
+            st.rerun()
+    
+    with col4:
+        if st.button("😰 Anxiety"):
+            st.session_state.user_input = "I'm experiencing anxiety and panic attacks"
+            handle_user_input()
+            st.rerun()
+
+def display_resource_browser():
+    """Display resource browser in expandable section."""
+    with st.expander("🔍 Browse All Resources"):
+        resource_type = st.selectbox(
+            "Filter by type:",
+            ["All", "Crisis Support", "Counseling", "Academic Support", "Peer Support", "MindBridge Benefits"]
+        )
+        
+        if resource_type == "All":
+            resources = list(resource_db.resources.values())
+        elif resource_type == "Crisis Support":
+            resources = resource_db.get_crisis_resources()
+        elif resource_type == "MindBridge Benefits":
+            resources = resource_db.get_mindbridge_resources()
+        else:
+            # Map display names to resource types
+            type_mapping = {
+                "Counseling": "counseling",
+                "Academic Support": "academic_support", 
+                "Peer Support": "peer_support"
+            }
+            from data_models import ResourceType
+            resources = resource_db.get_resources_by_type(
+                ResourceType(type_mapping.get(resource_type, "counseling"))
+            )
+        
+        for resource in resources[:10]:  # Limit display
+            st.markdown(f"""
+            <div class="resource-card">
+                <strong>{resource.name}</strong><br>
+                {resource.description}<br>
+                <small>
+                    {resource.contact_info.get('phone', '')} 
+                    {resource.contact_info.get('website', '')}
+                </small>
+            </div>
+            """, unsafe_allow_html=True)
+
+def main():
+    """Main application function."""
+    # Initialize session state
+    initialize_session_state()
+    
+    # Display header
+    display_header()
+    
+    # Display crisis banner if needed
+    display_crisis_banner()
+    
+    # Display sidebar
+    display_sidebar()
+    
+    # Main chat interface
+    st.markdown("### 💬 Chat with Mental Health Assistant")
+    
+    # Display welcome message
+    display_welcome_message()
+    
+    # Display chat history
+    display_chat_history()
+    
+    # Chat input
+    st.text_input(
+        "Type your message here...",
+        key="user_input",
+        on_change=handle_user_input,
+        placeholder="How are you feeling today? What's on your mind?"
+    )
+    
+    # Quick actions (only show if no conversation yet)
+    if len(st.session_state.chat_history) == 0:
+        display_quick_actions()
+    
+    # Resource browser
+    display_resource_browser()
+    
+    # Footer
+    st.markdown("---")
+    st.markdown("""
+    <div style="text-align: center; color: #666; font-size: 0.8em;">
+        <p>This service is provided in partnership with MindBridge Care and Northeastern University.</p>
+        <p>For immediate emergencies, call 911. For crisis support, call 988.</p>
+        <p>Remember: This chatbot is not a replacement for professional mental health care.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Cleanup old sessions periodically
+    if len(conversation_manager.active_sessions) > 100:
+        cleaned = conversation_manager.cleanup_old_sessions(hours=2)
+        if cleaned > 0:
+            logger.info(f"Cleaned up {cleaned} old sessions")
+
+if __name__ == "__main__":
+    main()
