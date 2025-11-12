@@ -80,8 +80,15 @@ class LLMClient:
                     'gemini-pro'
                 ]
             
-            # Try each available model
-            for model_name in available_models:
+            # Try each available model, prioritizing Flash models for mental health content
+            prioritized_models = [
+                'models/gemini-2.5-flash',
+                'gemini-2.5-flash',
+                'models/gemini-1.5-flash-latest',
+                'models/gemini-1.5-flash'
+            ] + [m for m in available_models if 'flash' not in m.lower()]
+            
+            for model_name in prioritized_models:
                 try:
                     self.client = genai.GenerativeModel(model_name)
                     logger.info(f"🤖 Successfully using Gemini model: {model_name}")
@@ -184,31 +191,50 @@ class LLMClient:
             response = self.client.generate_content(
                 prompt,
                 generation_config={
-                    'max_output_tokens': config.MAX_TOKENS,
-                    'temperature': config.TEMPERATURE
+                    'max_output_tokens': min(config.MAX_TOKENS * 2, 2000),  # Increase token limit
+                    'temperature': config.TEMPERATURE,
+                    'top_p': 0.8,
+                    'top_k': 40
                 },
                 safety_settings=[
                     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
                     {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
                     {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"},
+                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
                 ]
             )
             
             # Check if response was blocked or has issues
             if not response.candidates:
+                logger.warning("🚫 No candidates returned by Gemini")
                 raise ValueError("No candidates returned by Gemini")
             
             candidate = response.candidates[0]
+            logger.info(f"🔍 Gemini response - finish_reason: {candidate.finish_reason}, content_parts: {len(candidate.content.parts) if candidate.content else 0}")
+            
             if candidate.finish_reason == 3:  # SAFETY
+                logger.warning("🛡️ Response blocked by safety filters")
                 raise ValueError("Response blocked by safety filters")
             elif candidate.finish_reason == 4:  # RECITATION  
+                logger.warning("🔄 Response blocked for recitation")
                 raise ValueError("Response blocked for recitation")
+            elif candidate.finish_reason == 2:  # MAX_TOKENS - but check if we got content
+                logger.warning("⚠️ Response hit max tokens limit")
+                if not candidate.content or not candidate.content.parts:
+                    raise ValueError("Response hit token limit with no content")
             elif not candidate.content or not candidate.content.parts:
-                raise ValueError("Response has no content parts")
+                logger.warning(f"❌ No content parts - finish_reason: {candidate.finish_reason}")
+                # Try to get more info about why there's no content
+                safety_info = []
+                for rating in candidate.safety_ratings:
+                    safety_info.append(f"{rating.category}:{rating.probability}")
+                logger.warning(f"🛡️ Safety ratings: {', '.join(safety_info)}")
+                raise ValueError(f"Response has no content parts (finish_reason: {candidate.finish_reason})")
             
             # Extract text safely
-            return candidate.content.parts[0].text.strip()
+            response_text = candidate.content.parts[0].text.strip()
+            logger.info(f"✅ Gemini response generated: {len(response_text)} characters")
+            return response_text
             
         except Exception as e:
             # If Gemini fails, let the parent method handle fallback
